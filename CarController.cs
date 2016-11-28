@@ -1,8 +1,6 @@
 ﻿using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
-using Trails;
-using UnityEngine.UI;
 
 public class CarController : MonoBehaviour 
 {
@@ -19,13 +17,12 @@ public class CarController : MonoBehaviour
 	public float AntiRollA;
 	private float wheelRPM;
 	//engine powerband
-	float minRPM = 1500;
+	float minRPM = 2000;
 	float maxRPM = 7000;
 	//maximum Engine Torque
-	public float maxTorque = 1600.0f;
-	//automatic transmission shift points
+	public float maxTorque = 1300.0f;
 	float shiftDownRPM = 2200;
-	float shiftUpRPM = 6300;
+	float shiftUpRPM = 6500;
 	public int gears = 5;
 	int gear=1;
 	public float[] gearRatios;
@@ -35,43 +32,48 @@ public class CarController : MonoBehaviour
 	WheelFrictionCurve defaultFrictionSideways;
 	WheelFrictionCurve roadFrictionSideways;
 	WheelFrictionCurve roadFrictionForward;
+	WheelFrictionCurve dirtFrictionSideways;
+	WheelFrictionCurve dirtFrictionForward;
+	public Vector3 lastCheck = new Vector3(965,12,347);
 	private float mph;
 	//Stores all live trails
-	private LinkedList<Trail> trails = new LinkedList<Trail>();
 	public bool onRoad = false;
 	//Parameters
-	public float width = 0.1f;
-	public float decayTime = 1f;
-	public Material material;
-	public int roughness = 0;
-	public bool softSourceEnd = false;
-	private AudioSource carSound;
+
+	public AudioSource carSound;
+	public AudioClip dirtSound;
+	public AudioClip roadSound;
+	public AudioClip defaultSound;
+
+	public GameObject skidMarkPrefabFL;
+	public GameObject skidMarkPrefabFR;
+	public GameObject skidMarkPrefabBL;
+	public GameObject skidMarkPrefabBR;
+
+	public Material roadSkidMat;
+	public Material dirtSkidMat;
+	public Material defaultSkidMat;
 	
-	//the range for audio source pitch
-	private const float lowPtich = 0.5f;
-	private const float highPitch = 5f;
-	
-	//change the reductionFactor to 0.1f if you are using the rigidbody velocity as parameter to determine the pitch
-	private const float reductionFactor = .1f;
-	
-
-
-
-
+	public float startSideSlip;
+	public float endSlip;
+	float returnPower;
+	Light  myLight ;
+	Light  myLight2 ;
+	GameObject[] lightObj;
 
 	void Awake ()
 	{
-		//get the Audio Source component attached to the car
-		carSound = GetComponent<AudioSource>();
-		//get the wheelJoint2D component attached to the car
-		//wj = GetComponent<WheelJoint2D>();
-		//carRigidbody = GetComponent<Rigidbody2D>();
+
+
 	}
 
 	void Start ()
-	{	    
-
-
+	{	
+		carSound = this.GetComponent<AudioSource>();
+		skidMarkPrefabFL.GetComponent<AudioSource>().clip = defaultSound;
+		skidMarkPrefabFR.GetComponent<AudioSource>().clip = defaultSound;
+		skidMarkPrefabBL.GetComponent<AudioSource>().clip = defaultSound;
+		skidMarkPrefabBR.GetComponent<AudioSource>().clip = defaultSound;
 
 		defaultFrictionForward.extremumSlip = 0.25f;//0.4f;
 		defaultFrictionForward.extremumValue = 2.5f;//1.0f;
@@ -84,39 +86,54 @@ public class CarController : MonoBehaviour
 		defaultFrictionSideways.extremumValue = 2.2f;//1.0f;
 		defaultFrictionSideways.asymptoteSlip = 0.8f;//0.5f;
 		defaultFrictionSideways.asymptoteValue = 1.0f;//0.75f;
-		defaultFrictionSideways.stiffness = 1.4f;//5.0f;
+		defaultFrictionSideways.stiffness = 1.2f;//5.0f;
 
-
+		lastCheck = transform.position;
 		roadFrictionForward = defaultFrictionForward;
 		roadFrictionSideways = defaultFrictionSideways;
-		roadFrictionForward.stiffness = 1.5f;
+		dirtFrictionForward = defaultFrictionForward;
+		dirtFrictionSideways = defaultFrictionSideways;
+		dirtFrictionForward.stiffness = 1.6f;
+		dirtFrictionSideways.stiffness = 1.4f;
+		roadFrictionForward.stiffness = 1.8f;
 		roadFrictionSideways.stiffness = 1.6f;
 
-
-
+		skidMarkPrefabFL.GetComponent<TrailRenderer>().material = defaultSkidMat;
+		skidMarkPrefabFR.GetComponent<TrailRenderer>().material = defaultSkidMat;
+		skidMarkPrefabBL.GetComponent<TrailRenderer>().material = defaultSkidMat;
+		skidMarkPrefabBR.GetComponent<TrailRenderer>().material = defaultSkidMat;
+		lightObj = GameObject.FindGameObjectsWithTag ("light");
+		myLight = lightObj[0].GetComponent<Light>();
+		myLight2 = lightObj[1].GetComponent<Light>();
+	
+		myLight.enabled = false;
+		myLight2.enabled = false;
 
 		for (int i = 0; i < wheels.Length; i++)
 		{			
 			GetCollider (i).forwardFriction = defaultFrictionForward;
 			GetCollider (i).sidewaysFriction = defaultFrictionSideways;
+
+			//skidMarkPrefab = (GameObject)Instantiate(skidMarkPrefab, GetCollider(i).transform.TransformPoint(GetCollider(i).center ) - (GetCollider (i).transform.up * (GetCollider (i).suspensionDistance * 0.8f)), Quaternion.identity);
 		}
+
 		body.centerOfMass = new Vector3(0,-0.5f,0.4f);
+
 		for (int i = 0; i < wheels.Length; i++)
 		{
-
 			GetCollider(i).mass = 20.0f;
 			GetCollider(i).radius = 0.51f;
 			GetCollider(i).wheelDampingRate =0.64f;
 			GetCollider(i).forceAppPointDistance = 0.2f;			
 		}
-	}
 
-	void FixedUpdate()
+	}
+	
+	void Update ()
 	{
-		if (!canMove) {
+
+		if (!canMove)
 			return;
-		}
-		
 		if (automatic)
 		{
 			AutomaticTransmission();
@@ -129,22 +146,25 @@ public class CarController : MonoBehaviour
 				ChangeGear(changeUp);
 		}
 		Controls();
-		TrailUpdater();
-		
-		NewTrail (GetCollider(0));
-		NewTrail (GetCollider(1));
-		NewTrail (GetCollider(2));
-		NewTrail (GetCollider(3));
 		mph = body.velocity.magnitude * 2.237f;
-		 	
-		for (int i = 0; i < wheels.Length; i++)
-		{
-			GripLevels(GetCollider(i));
+
+		if (fuel <= 0) {
+			maxTorque = 0;
+		} 
+		else if (fuel > 0) {
+			maxTorque =1200;
 		}
+		 
+	}
+
+	void FixedUpdate()
+	{
+
+
+
 		if(onRoad)
 		{
-			/*wheel.forwardFriction = defaultFrictionForward;
-			wheel.sidewaysFriction = roadFrictionSideways;*/
+
 			for (int i = 0; i < wheels.Length; i++)
 			{
 				GetCollider(i).forwardFriction = defaultFrictionForward;
@@ -152,9 +172,16 @@ public class CarController : MonoBehaviour
 			}
 		}
 
-		carSound.pitch = (engineRPM/2000);
+		carSound.pitch = (engineRPM/1800);
+		GripLevels (GetCollider (0), skidMarkPrefabFL);
+		GripLevels (GetCollider (1), skidMarkPrefabFR);
+		GripLevels (GetCollider (2), skidMarkPrefabBL);
+		GripLevels (GetCollider (3), skidMarkPrefabBR);
+		Skidding (GetCollider (0), skidMarkPrefabFL);
+		Skidding (GetCollider (1), skidMarkPrefabFR);
+		Skidding (GetCollider (2), skidMarkPrefabBL);
+		Skidding (GetCollider (3), skidMarkPrefabBR);
 	}
-
 
 	//RETURNS A WHEELCOLLIDER 
 	//0 = FRONT LEFT, 1 = FRONT RIGHT, 
@@ -164,66 +191,57 @@ public class CarController : MonoBehaviour
 		return wheels[n].gameObject.GetComponent<WheelCollider>();    
 	}
 
-	public bool Active
-	{
-		get { return (trails.Count == 0?false:(!trails.Last.Value.Finished)); }
-	}
-
-	public void EndTrail()
-	{
-		if(!Active) return;
-		trails.Last.Value.Finish();
-	}
-
-
 	//GUI FOR DEBUGGING
-	void Update()
-	{	
-		if (GetComponent<CarNetworking> ().isLocalPlayer) {
-			GameObject.Find("MPH").GetComponent<Text>().text = mph.ToString("F2") + "MPH";
-			GameObject.Find("FUEL").GetComponent<Text>().text = "FUEL " + fuelText;
-			GameObject.Find("GEAR").GetComponent<Text>().text = "GEAR " + gear.ToString();
-			GameObject.Find("ENGINE").GetComponent<Text>().text = "POWER " + GetCollider(0).motorTorque;
-			GameObject.Find("RPM").GetComponent<Text>().text = engineRPM + " RPM";
-		}
-		//GUI.Box(new Rect((Screen.width - 200), 50, 150, 100),
-		//new GUIContent(mph.ToString("F2") + "\nFuel: " + fuelText +"\nGear: " + gear + "\n engine power: " + GetCollider(0).motorTorque + "\n curr rpm: " + engineRPM));		
+	void OnGUI()
+	{
+
+		GUI.Box(new Rect((Screen.width - 200), 50, 150, 100),
+		        new GUIContent(mph.ToString("F2") + "\nFuel: " + fuelText +"%\nGear: " + gear + "\n engine power: " + GetCollider(0).motorTorque + "\n curr rpm: " + engineRPM));		
 	}
 
-
-	void TrailUpdater()
+	void Skidding(WheelCollider wheel, GameObject skids)
 	{
-		//Don't update if there are no trails
-		if(trails.Count == 0) return;
-		
-		//Essentially a foreach loop, allowing trails to be removed from the list if they are finished
-		LinkedListNode<Trail> t = trails.First;
-		LinkedListNode<Trail> n;
-		do
+		RaycastHit hit;
+		Vector3 ColliderCenterPoint = wheel.transform.TransformPoint( wheel.center );
+
+		if ( Physics.Raycast( ColliderCenterPoint, -wheel.transform.up, out hit, wheel.suspensionDistance + wheel.radius ) ) 
 		{
-			n = t.Next;
-			t.Value.Update();
-			if(t.Value.Dead)
-				trails.Remove(t);
-			t = n;
-		}while(n != null);
+			skids.transform.position = hit.point + (new Vector3(0,0.1f,0));
+
+		}else
+		{
+			skids.transform.position = ColliderCenterPoint - (wheel.transform.up * wheel.suspensionDistance);
+		}
+
+		WheelHit CorrespondingGroundHit;
+		wheel.GetGroundHit( out CorrespondingGroundHit );
+
+		if ( Mathf.Abs( CorrespondingGroundHit.sidewaysSlip ) > startSideSlip)
+		{
+			skids.gameObject.GetComponent<AudioSource>().volume = Mathf.Clamp((CorrespondingGroundHit.sidewaysSlip - startSideSlip) + 1.4f, 0.001f,0.25f);
+			skids.gameObject.SetActive(true);
+			//Debug.Log("Skid Volume" + (Mathf.Clamp(CorrespondingGroundHit.sidewaysSlip - startSideSlip, 0.001f,0.2f)));
+		}
+		else if (Mathf.Abs( CorrespondingGroundHit.sidewaysSlip)  <= endSlip)
+		{
+			StartCoroutine(KillSkids(skids));
+		}
 	}
 
-
-	public void NewTrail(WheelCollider coll)
+	IEnumerator KillSkids(GameObject skid)
 	{
-		WheelHit hit = new WheelHit();
-		coll.GetGroundHit(out hit);
-
-		//Stops emitting the last trail and passes the parameters onto a new one
-		EndTrail();
-		//trails.AddLast(new Trail(hit.collider.transform,  material, decayTime, roughness, softSourceEnd, width));
+		yield return new WaitForSeconds(.5f);
+		skid.SetActive(false);
 	}
 
 	void Controls()
 	{
+
+
 		if(Input.GetAxis("Vertical") > 0)
 		{
+			myLight.enabled = false;
+			myLight2.enabled = false;// turns off lights
 			for (int i = 0; i < wheels.Length; i++)
 			{
 				GetCollider(i).brakeTorque=0.0f;
@@ -231,19 +249,26 @@ public class CarController : MonoBehaviour
 			}
 		}
 		else if (Input.GetAxis("Vertical") < 0)
-		{
+		{	
 			if(gear == 0)
-			{
-				
+			{		
+				myLight.enabled = true;
+				myLight2.enabled = true;
+				myLight.color = Color.white;
+				myLight2.color = Color.white;//turns on reverse light
 				for (int i = 0; i < wheels.Length; i++)
 				{
 					GetCollider(i).motorTorque=CalcEngine(-Input.GetAxis("Vertical"));
 					GetCollider(i).brakeTorque= 0.0f;
-				}
-				
+
+				}				
 			}
 			else
 			{
+				myLight.enabled = true;
+				myLight2.enabled = true;
+				myLight.color = Color.red;
+				myLight2.color = Color.red;//break light
 				for (int i = 0; i < wheels.Length; i++)
 				{
 					GetCollider(i).motorTorque=CalcEngine(0.0f);
@@ -256,14 +281,34 @@ public class CarController : MonoBehaviour
 		} 
 		else
 		{
+			myLight.enabled = false;
+			myLight2.enabled = false;
 			for (int i = 0; i < wheels.Length; i++)
 			{
 				GetCollider(i).brakeTorque=0.0f;
 				GetCollider(i).motorTorque=CalcEngine(Input.GetAxis("Vertical"));
 			}
 		}
+
+		if (Input.GetKeyDown (KeyCode.R))//reset button returns you to last checkpoint
+		{
+			body.velocity = Vector3.zero;
+			body.angularVelocity = Vector3.zero;
+			body.transform.position = lastCheck;
+			body.transform.rotation = Quaternion.Euler(0, 0, 0);
 		
-		
+			engineRPM =0;
+			GetCollider(0).motorTorque = 0;
+			GetCollider(1).motorTorque = 0;
+			GetCollider(2).motorTorque = 0;
+			GetCollider(3).motorTorque = 0;
+			return;
+
+		}
+		if (Input.GetKeyDown (KeyCode.F)) {
+			fuel += 25;
+		}
+
 		wheelRPM= body.velocity.magnitude*60.0f*0.5f;
 		steer=Input.GetAxis("Horizontal") * maxSteer;	
 		fuelText = fuel.ToString("F2");		
@@ -272,10 +317,7 @@ public class CarController : MonoBehaviour
 		for (int i = 0; i < wheels.Length; i++)
 		{
 			ApplyLocalPositionToVisuals(GetCollider(i));
-		}
-		
-		
-		
+		}		
 		//ANTIROLL = MAKE SURE 
 		//0 = FRONT LEFT, 1 = FRONT RIGHT, 
 		//2 = BACK LEFT,  3 = BACK RIGHT
@@ -301,8 +343,6 @@ public class CarController : MonoBehaviour
 			if(engineRPM<shiftDownRPM&&gear>1)
 				gear--;
 		}
-
-
 	}
 	//mANUAL gEARcHANGES FOR KEYBOARD/360 CONTROLLER.
 	void ChangeGear(bool changeUp)
@@ -317,14 +357,14 @@ public class CarController : MonoBehaviour
 	//RUDIMENTARY POWER CALCULATOR
 	float CalcEngine(float power)
 	{
+		motor = power * Time.deltaTime * 10; //controller right trigger (360-win10)				
+		engineRPM = wheelRPM * gearRatios[gear] * finalDriveRatio;
+		if (fuel >= 0) {
+			fuel -= (Mathf.Abs (0.000003f * engineRPM));
+		} else if (fuel < 0) {
+			fuel = 0;
+		}
 
-		motor = power * Time.deltaTime * 10; //controller right trigger (360-win10)
-		fuel -= 0.01f  * power;	
-
-
-
-				
-		engineRPM = wheelRPM * gearRatios[gear] * finalDriveRatio;		
 		if(engineRPM<minRPM)
 		{
 			engineRPM=minRPM;//KEEPIDLE
@@ -335,50 +375,78 @@ public class CarController : MonoBehaviour
 			float x=(2*(engineRPM/maxRPM)-1);
 			float torqueCurve = 0.5f*(-x*x+2);
 			float torqueToForceRatio = gearRatios[gear]*finalDriveRatio;
-			return motor*maxTorque*torqueCurve*torqueToForceRatio;
+			returnPower = motor*maxTorque*torqueCurve*torqueToForceRatio;
+
+			return returnPower;
 		}	      
-		else
+		else 
 			//rpmdelimiter
 			return 0;
+
 	}
 	
 	//COLLISION HANDLING
 	void OnCollisionEnter ( Collision other  )
 	{
 		if(other.gameObject.name=="Fuel")
-		{
-			fuel += 25;
+		{	
+
 			Destroy(other.gameObject);
 		}
 
-
 	}	
-	void GripLevels(WheelCollider wheel)
+	void OnTriggerEnter (Collider other)
+	{
+		if (other.gameObject.tag == "Checkpoint") 
+		{
+
+		}
+	}
+	public void addFuel()
+	{
+		lastCheck = body.transform.position; //sets checkpoint for reset function
+		fuel += 10;
+		if(fuel>100)
+			fuel=100;
+	}
+
+	void GripLevels(WheelCollider wheel, GameObject skidPrefab)
 	{
 		WheelHit hit;
 		if(wheel.GetGroundHit(out hit))
 		{
-
 			if(hit.collider.gameObject.tag == "Road")
 			{
+				skidPrefab.GetComponent<AudioSource>().clip = roadSound;
+				skidPrefab.GetComponent<TrailRenderer>().material = roadSkidMat;
 				if(wheel.sidewaysFriction.stiffness != roadFrictionSideways.stiffness)
 				{
 					Debug.Log ("Road grip!");
 					wheel.sidewaysFriction = roadFrictionSideways;
 				}
 			}
+			else if(hit.collider.gameObject.tag == "Dirt")
+			{
+				skidPrefab.GetComponent<AudioSource>().clip = dirtSound;
+				skidPrefab.GetComponent<TrailRenderer>().material = dirtSkidMat;
+				if(wheel.sidewaysFriction.stiffness != roadFrictionSideways.stiffness)
+				{
+					Debug.Log ("Dirt grip!");
+					wheel.sidewaysFriction = roadFrictionSideways;
+				}
+			}
 			else 
 			{
+				skidPrefab.GetComponent<AudioSource>().clip = defaultSound;
+				skidPrefab.GetComponent<TrailRenderer>().material = defaultSkidMat;
 				if (wheel.sidewaysFriction.stiffness != defaultFrictionSideways.stiffness)
 				{
 					wheel.sidewaysFriction = defaultFrictionSideways;
 				}
-			}
-			
+			}			
 		}
 		else
-		{
-		
+		{		
 			for (int i = 0; i < wheels.Length; i++)
 			{			
 				wheel.forwardFriction = defaultFrictionForward;
@@ -386,9 +454,6 @@ public class CarController : MonoBehaviour
 			}
 		}
 	}
-
-
-
 
 	//ROTATE WHEEL MESHES WITH WHEELCOLLIDERS
 	void ApplyLocalPositionToVisuals ( WheelCollider coll  )
@@ -398,8 +463,9 @@ public class CarController : MonoBehaviour
 			return;
 		}
 		Transform visualWheel = coll.transform.GetChild(0);
-		Vector3 position = gameObject.transform.position;
-		Quaternion quat = gameObject.transform.rotation;
+		Vector3 position;
+		Quaternion quat;
+		//(out  Vector3 position ,  out  Quaternion quat  );
 		coll.GetWorldPose(out position, out quat);
 		visualWheel.transform.position = position;
 		visualWheel.transform.rotation = quat;		
